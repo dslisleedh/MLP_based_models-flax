@@ -2,21 +2,18 @@ from utils import Droppath
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
-from einops import rearrange
 
 
 class SpatialShift(nn.Module):
     group: int
 
-    @nn.compact
     def spatial_shift(self, x):
-        b, h, w, c = x.shape
-        x = jnp.split(x, 4, axis=-1)
-        x[0] = x[0].at[:, :, 1:, :].set(x[0][:, :, :w - 1, :])
-        x[1] = x[1].at[:, :, :w - 1, :].set(x[1][:, :, 1:, :])
-        x[2] = x[2].at[:, 1:, :, :].set(x[2][:, :h - 1, :, :])
-        x[3] = x[3].at[:, :h - 1, :, :].set(x[3][:, 1:, :, :])
-        return jnp.concatenate(x, axis=-1)
+        _, h, w, c = x.shape
+        x = x.at[:, :, 1:, :c // 4].set(x[:, :, :w - 1, :c // 4]) \
+            .at[:, :, :w - 1, c // 4:c // 2].set(x[:, :, 1:, c // 4:c // 2]) \
+            .at[:, 1:, :, c // 2:c // 4 * 3].set(x[:, :h - 1, :, c // 2:c // 4 * 3]) \
+            .at[:, :h - 1, :, c // 4 * 3:].set(x[:, 1:, :, c // 4 * 3:])
+        return x
 
     @nn.compact
     def __call__(self, x):
@@ -70,12 +67,11 @@ class S2MLP(nn.Module):
                     kernel_size=(self.p, self.p),
                     strides=(self.p, self.p),
                     padding='VALID'
-                    )
-        x = rearrange(x, 'b h w c -> b (h w) c')
+                    )(x)
         survival_prob = jnp.linspace(0., self.stochastic_depth, num=self.n)
         for prob in survival_prob:
             x = S2Block(self.c, self.r, prob, not self.is_training)(x)
-        x = jnp.mean(x, 1)
+        x = jnp.mean(x, [1, 2])
         x = nn.Dense(self.num_labels)(x)
         x = nn.softmax(x)
         return x
