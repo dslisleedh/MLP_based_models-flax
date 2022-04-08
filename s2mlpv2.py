@@ -85,7 +85,6 @@ class S2MLPv2(nn.Module):
                         padding='VALID',
                         use_bias=False
                         )(x)
-            print(x.shape)
             for k in range(self.n_blocks[i]):
                 x = S2Blockv2(self.n_filters[i],
                               survival_prob[i * (self.n_blocks[0]) + k],
