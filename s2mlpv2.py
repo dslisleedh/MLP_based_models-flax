@@ -5,7 +5,6 @@ import flax.linen as nn
 
 
 class SpatialShiftAttention(nn.Module):
-    n_filters: int
     k: int = 3
 
     def spatial_shift1(self, x):
@@ -26,20 +25,18 @@ class SpatialShiftAttention(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        b, h, w, _ = x.shape
-        x = nn.Dense(self.n_filters * self.k)(x)
-        x1 = self.spatial_shift1(x[:, :, :, :self.n_filters])
-        x2 = self.spatial_shift2(x[:, :, :, self.n_filters:self.n_filters*2])
-        x3 = x[:, :, :, self.n_filters*2:]
-        x = jnp.reshape(jnp.stack([x1, x2, x3], axis=1), (b, self.k, -1, self.n_filters))
-        a = jnp.sum(jnp.sum(x, 1), 1)
-        a_hat = nn.Dense(self.n_filters*self.k,use_bias=False)(nn.gelu(nn.Dense(self.n_filters, use_bias=False)(a)))
-        a_hat = jnp.reshape(a_hat, (b, self.k, self.n_filters))
+        b, h, w, c = x.shape
+        x = nn.Dense(c * self.k)(x)
+        x = x.at[:, :, :, :c].set(self.spatial_shift1(x[:, :, :, :c])) \
+            .at[:, :, :, c:c * 2].set(self.spatial_shift2(x[:, :, :, c:c * 2]))
+        a = jnp.sum(jnp.reshape(x, (b, self.k, -1, c)), 1)
+        a_hat = nn.Dense(c * self.k, use_bias=False)(nn.gelu(nn.Dense(c, use_bias=False)(a)))
+        a_hat = jnp.reshape(a_hat, (b, self.k, c))
         a_bar = nn.softmax(a_hat, axis=1)
         attention = jnp.expand_dims(a_bar, axis=-2)
         x = attention * x
-        x = jnp.reshape(jnp.sum(x, axis=1), (b, h, w, self.n_filters))
-        x = nn.Dense(self.n_filters)(x)
+        x = jnp.reshape(jnp.sum(x, axis=1), (b, h, w, c))
+        x = nn.Dense(c)(x)
         return x
 
 
@@ -62,7 +59,7 @@ class S2Blockv2(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        y = Droppath(self.survival_prob, self.deterministic)(SpatialShiftAttention(self.n_filters)(nn.LayerNorm()(x))) + x
+        y = Droppath(self.survival_prob, self.deterministic)(SpatialShiftAttention()(nn.LayerNorm()(x))) + x
         z = Droppath(self.survival_prob, self.deterministic)(CMMLP(self.n_filters)(nn.LayerNorm()(y))) + y
         return z
 
