@@ -30,8 +30,8 @@ class SpatialShiftAttention(nn.Module):
     def __call__(self, x):
         b, h, w, c = x.shape
         x = nn.Dense(c * self.k)(x)
-        x = x.at[:, :, :, :c].set(self.spatial_shift1(x[:, :, :, :c])) \
-            .at[:, :, :, c:c * 2].set(self.spatial_shift2(x[:, :, :, c:c * 2]))
+        x = x.at[:, :, :, :c].set(spatial_shift1(x[:, :, :, :c])) \
+            .at[:, :, :, c:c * 2].set(spatial_shift2(x[:, :, :, c:c * 2]))
         x = rearrange(x, 'b h w (k c) -> b k (h w) c',
                       k=self.k
                       )

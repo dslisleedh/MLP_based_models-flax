@@ -19,7 +19,7 @@ class SpatialShift(nn.Module):
     @nn.compact
     def __call__(self, x):
         groups = jnp.split(x, self.group, axis=-1)
-        return jnp.concatenate([self.spatial_shift(g) for g in groups],
+        return jnp.concatenate([spatial_shift(g) for g in groups],
                                axis=-1
                                )
 
