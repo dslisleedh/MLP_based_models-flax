@@ -5,24 +5,26 @@ import jax.numpy as jnp
 import flax.linen as nn
 
 
-class SpatialShiftAttention(nn.Module):
-    k: int = 3
-
-    def spatial_shift1(self, x):
-        _, h, w, c = x.shape
-        x = x.at[:, :, 1:, :c // 4].set(x[:, :, :w - 1, :c // 4]) \
+def spatial_shift1(x):
+    _, h, w, c = x.shape
+    x = x.at[:, :, 1:, :c // 4].set(x[:, :, :w - 1, :c // 4]) \
             .at[:, :, :w - 1, c // 4:c // 2].set(x[:, :, 1:, c // 4:c // 2]) \
             .at[:, 1:, :, c // 2:c // 4 * 3].set(x[:, :h - 1, :, c // 2:c // 4 * 3]) \
             .at[:, :h - 1, :, c // 4 * 3:].set(x[:, 1:, :, c // 4 * 3:])
-        return x
+    return x
 
-    def spatial_shift2(self, x):
-        _, h, w, c = x.shape
-        x = x.at[:, 1:, :, :c // 4].set(x[:, :h - 1, :, :c // 4]) \
+
+def spatial_shift2(x):
+    _, h, w, c = x.shape
+    x = x.at[:, 1:, :, :c // 4].set(x[:, :h - 1, :, :c // 4]) \
             .at[:, :h - 1, :, c // 4:c // 2].set(x[:, 1:, :, c // 4:c // 2]) \
             .at[:, :, 1:, c // 2:c // 4 * 3].set(x[:, :, :w - 1, c // 2:c // 4 * 3]) \
             .at[:, :, :w - 1, c // 4 * 3:].set(x[:, :, 1:, c // 4 * 3:])
-        return x
+    return x
+
+
+class SpatialShiftAttention(nn.Module):
+    k: int = 3
 
     @nn.compact
     def __call__(self, x):

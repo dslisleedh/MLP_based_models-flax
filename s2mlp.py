@@ -4,16 +4,17 @@ import jax.numpy as jnp
 import flax.linen as nn
 
 
-class SpatialShift(nn.Module):
-    group: int
-
-    def spatial_shift(self, x):
-        _, h, w, c = x.shape
-        x = x.at[:, :, 1:, :c // 4].set(x[:, :, :w - 1, :c // 4]) \
+def spatial_shift(x):
+    _, h, w, c = x.shape
+    x = x.at[:, :, 1:, :c // 4].set(x[:, :, :w - 1, :c // 4]) \
             .at[:, :, :w - 1, c // 4:c // 2].set(x[:, :, 1:, c // 4:c // 2]) \
             .at[:, 1:, :, c // 2:c // 4 * 3].set(x[:, :h - 1, :, c // 2:c // 4 * 3]) \
             .at[:, :h - 1, :, c // 4 * 3:].set(x[:, 1:, :, c // 4 * 3:])
-        return x
+    return x
+
+
+class SpatialShift(nn.Module):
+    group: int
 
     @nn.compact
     def __call__(self, x):
