@@ -1,4 +1,5 @@
 from utils import Droppath
+from einops import rearrange
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
@@ -29,7 +30,10 @@ class SpatialShiftAttention(nn.Module):
         x = nn.Dense(c * self.k)(x)
         x = x.at[:, :, :, :c].set(self.spatial_shift1(x[:, :, :, :c])) \
             .at[:, :, :, c:c * 2].set(self.spatial_shift2(x[:, :, :, c:c * 2]))
-        a = jnp.sum(jnp.reshape(x, (b, self.k, -1, c)), 1)
+        x = rearrange(x, 'b h w (k c) -> b k (h w) c',
+                      k=self.k
+                      )
+        a = jnp.sum(x, [1, 2])
         a_hat = nn.Dense(c * self.k, use_bias=False)(nn.gelu(nn.Dense(c, use_bias=False)(a)))
         a_hat = jnp.reshape(a_hat, (b, self.k, c))
         a_bar = nn.softmax(a_hat, axis=1)
