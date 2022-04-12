@@ -23,7 +23,6 @@ class MLP(nn.Module):
 
 class WeightedPermutator(nn.Module):
     deterministic: bool
-    n_segmentations: int = 8
     qkv_bias: bool = False
     attn_droprate: float = 0.
     proj_droprate: float = 0.
@@ -33,19 +32,19 @@ class WeightedPermutator(nn.Module):
     def __call__(self, x):
         shape = x.shape
         h = rearrange(x, 'b h w (s c) -> b c w (s h)',
-                      s=self.n_segmentations
+                      s=shape[-1] // shape[1]
                       )
         h = nn.Dense(shape[-1], use_bias=self.qkv_bias)(h)
         h = rearrange(h, 'b c w (s h) -> b h w (s c)',
-                      s=self.n_segmentations
+                      s=shape[-1] // shape[1]
                       )
 
         w = rearrange(x, 'b h w (s c) -> b h c (s w)',
-                      s=self.n_segmentations
+                      s=shape[-1] // shape[2]
                       )
         w = nn.Dense(shape[-1], use_bias=self.qkv_bias)(w)
         w = rearrange(w, 'b h c (s w) -> b h w (s c)',
-                      s=self.n_segmentations
+                      s=shape[-1] // shape[2]
                       )
         c = nn.Dense(shape[-1], use_bias=self.qkv_bias)(x)
 
@@ -58,3 +57,45 @@ class WeightedPermutator(nn.Module):
         x = nn.Dropout(self.proj_droprate, deterministic=self.deterministic)(nn.Dense(shape[-1])(x))
         return x
 
+
+class PermutationBlock(nn.Module):
+    deterministic: bool
+    n_filters: int
+    survival_prob: float
+
+    @nn.compact
+    def __call__(self, x):
+        x = Droppath(self.survival_prob, self.deterministic)(WeightedPermutator(self.deterministic)(nn.LayerNorm()(x))) + x
+        x = Droppath(self.survival_prob, self.deterministic)(MLP(self.n_filters, self.deterministic)(nn.LayerNorm()(x))) + x
+        return x
+
+
+class ViP(nn.Module):
+    is_training: bool
+    n_labels: int
+    stochastic_depth: float
+    n_filters = [256, 512]
+    patch_size = [7, 2]
+    n_layers = [7, 17]
+
+    @nn.compact
+    def __call__(self, x):
+        survival_prob = jnp.linspace(0., self.stochastic_depth, sum(self.n_layers))
+        for i in range(len(self.patch_size)):
+            x = nn.Conv(self.n_filters[i],
+                        kernel_size=(self.patch_size, self.patch_size),
+                        strides=(self.patch_size, self.patch_size),
+                        activation='linear',
+                        use_bias=False
+                        )(x)
+            for n in range(self.n_layers[i]):
+                x = PermutationBlock(not self.is_training,
+                                     self.n_filters[i],
+                                     survival_prob[sum(self.n_filters[:i]) + n]
+                                     )(x)
+        x = jnp.mean(x, [1, 2])
+        x = nn.Dense(self.n_labels,
+                     kernel_initializer=nn.initializers.zeros()
+                     )(x)
+        x = nn.softmax(x)
+        return x

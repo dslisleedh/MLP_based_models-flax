@@ -69,7 +69,7 @@ class S2MLP(nn.Module):
                     strides=(self.p, self.p),
                     padding='VALID'
                     )(x)
-        survival_prob = jnp.linspace(0., self.stochastic_depth, num=self.n)
+        survival_prob = 1. - jnp.linspace(0., self.stochastic_depth, num=self.n)
         for prob in survival_prob:
             x = S2Block(self.c, self.r, prob, not self.is_training)(x)
         x = jnp.mean(x, [1, 2])

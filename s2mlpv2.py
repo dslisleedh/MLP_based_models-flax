@@ -80,7 +80,7 @@ class S2MLPv2(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        survival_prob = jnp.linspace(0., self.stochastic_depth, sum(self.n_blocks))
+        survival_prob = 1. - jnp.linspace(0., self.stochastic_depth, sum(self.n_blocks))
         for i in range(len(self.patch_size)):
             x = nn.Conv(self.n_filters[i],
                         kernel_size=(self.patch_size[i], self.patch_size[i]),
