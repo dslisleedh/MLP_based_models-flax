@@ -7,26 +7,18 @@ from utils import Droppath
 
 class MLP(nn.Module):
     n_filters: int
-    deterministic: bool
     mlp_ratio: int = 3
-    dropout_rate: float = 0.
 
     @nn.compact
     def __call__(self, x):
         x = nn.Dense(self.n_filters * self.mlp_ratio)(x)
         x = nn.gelu(x)
-        x = nn.Dropout(self.dropout_rate, deterministic=self.deterministic)(x)
         x = nn.Dense(self.n_filters)(x)
-        x = nn.Dropout(self.dropout_rate, deterministic=self.deterministic)(x)
         return x
 
 
 class WeightedPermutator(nn.Module):
-    deterministic: bool
     qkv_bias: bool = False
-    attn_droprate: float = 0.
-    proj_droprate: float = 0.
-
 
     @nn.compact
     def __call__(self, x):
@@ -48,13 +40,13 @@ class WeightedPermutator(nn.Module):
                       )
         c = nn.Dense(shape[-1], use_bias=self.qkv_bias)(x)
 
-        a = jnp.mean(rearrange(h + w + c, 'b h w c -> b c (h w)'), axis=2)
-        a = nn.gelu(nn.Dropout(self.attn_droprate, deterministic=self.deterministic)(nn.Dense(shape[-1] // 4)(a)))
-        a = nn.Dropout(self.attn_droprate, deterministic=self.deterministic)(nn.Dense(shape[-1] * 3)(a))
-        a = jnp.expand_dims(nn.softmax(a.reshape(shape[0], shape[-1], 3).transpose(2, 0, 1), axis=0), [2,3])
+        a = jnp.mean(rearrange(h + w + c, 'b h w c -> b c (h w)'), axis=2)  # b c
+        a = nn.gelu(nn.Dense(shape[-1] // 4)(a))  # b 1/4*c
+        a = nn.Dense(shape[-1] * 3)(a)  # b 3*c
+        a = jnp.expand_dims(nn.softmax(a.reshape(shape[0], shape[-1], 3).transpose(2, 0, 1), axis=0), [2, 3])  # k b 1(h) 1(w) c
 
-        x = h * a[0, :, :, :, :] + w * a[1, :, :, :, :] + c * a[2, :, :, :, :]
-        x = nn.Dropout(self.proj_droprate, deterministic=self.deterministic)(nn.Dense(shape[-1])(x))
+        x = h * a[0, :, :, :, :] + w * a[1, :, :, :, :] + c * a[2, :, :, :, :]  # b h w c
+        x = nn.Dense(shape[-1])(x)  # b h w c
         return x
 
 
@@ -65,8 +57,8 @@ class PermutationBlock(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        x = Droppath(self.survival_prob, self.deterministic)(WeightedPermutator(self.deterministic)(nn.LayerNorm()(x))) + x
-        x = Droppath(self.survival_prob, self.deterministic)(MLP(self.n_filters, self.deterministic)(nn.LayerNorm()(x))) + x
+        x = Droppath(self.survival_prob, self.deterministic)(WeightedPermutator()(nn.LayerNorm()(x))) + x
+        x = Droppath(self.survival_prob, self.deterministic)(MLP(self.n_filters)(nn.LayerNorm()(x))) + x
         return x
 
 
