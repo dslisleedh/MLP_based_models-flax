@@ -72,12 +72,11 @@ class ViP(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        survival_prob = jnp.linspace(0., self.stochastic_depth, sum(self.n_layers))
+        survival_prob = 1. - jnp.linspace(0., self.stochastic_depth, sum(self.n_layers))
         for i in range(len(self.patch_size)):
             x = nn.Conv(self.n_filters[i],
-                        kernel_size=(self.patch_size, self.patch_size),
-                        strides=(self.patch_size, self.patch_size),
-                        activation='linear',
+                        kernel_size=(self.patch_size[i], self.patch_size[i]),
+                        strides=(self.patch_size[i], self.patch_size[i]),
                         use_bias=False
                         )(x)
             for n in range(self.n_layers[i]):
@@ -87,7 +86,7 @@ class ViP(nn.Module):
                                      )(x)
         x = jnp.mean(x, [1, 2])
         x = nn.Dense(self.n_labels,
-                     kernel_initializer=nn.initializers.zeros()
+                     kernel_init=nn.initializers.zeros
                      )(x)
         x = nn.softmax(x)
         return x
