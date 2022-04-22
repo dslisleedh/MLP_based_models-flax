@@ -5,26 +5,30 @@ from einops import rearrange
 from utils import Droppath
 
 
-def inner_region_rearrange(x, mode, groups):
+def inner_region_rearrange(x, mode, pixel, n_pads):
     if mode == 'h':
-        return rearrange(x, 'b (g h) w c -> b g w (h c)',
-                         g=groups
+        x = jnp.concatenate([x[:, -n_pads:, :, :], x], axis=1)
+        return rearrange(x, 'b (p h) w c -> b h w (p c)',
+                         p=pixel
                          )
     else:
-        return rearrange(x, 'b h (g w) c -> b g h (w c)',
-                         g=groups
+        x = jnp.concatenate([x[:, :, -n_pads:, :], x], axis=2)
+        return rearrange(x, 'b h (p w) c -> b h w (p c)',
+                         p=pixel
                          )
 
 
-def inner_region_restore(x, mode, pixel_split_size):
+def inner_region_restore(x, mode, pixel, n_pads):
     if mode == 'h':
-        return rearrange(x, 'b g w (h c) -> b (g h) w c',
-                         h=pixel_split_size
-                         )
+        x = rearrange(x, 'b h w (p c) -> b (p h) w c',
+                      p=pixel
+                      )
+        return x[:, n_pads:, :, :]
     else:
-        return rearrange(x, 'b g h (w c) -> b h (g w) c',
-                         w=pixel_split_size
-                         )
+        x = rearrange(x, 'b h w (p c) -> b h (p w) c',
+                      p=pixel
+                      )
+        return x[:, :, n_pads:, :]
 
 
 '''
@@ -44,21 +48,33 @@ def cross_region_restore(x, mode, s):
         return jnp.roll(x, -s, 2)
 
 
+class MLP(nn.Module):
+    expansion_rate: int = 4
+
+    @nn.compact
+    def __call__(self, x):
+        _, _, _, C = x.shape
+        x = nn.Dense(C * self.expansion_rate)(x)
+        x = nn.gelu(x)
+        x = nn.Dense(C)(x)
+        return x
+
+
 class HireModule(nn.Module):
     deterministic: bool
-    pixel_split_size: int
+    pixel_size: int
     s: int
     norm: str = 'batch'
 
     @nn.compact
     def __call__(self, x):
         B, H, W, C = x.shape
-        g_H = H // self.pixel_split_size
-        g_W = W // self.pixel_split_size
+        pad_h = (self.pixel_size - H % self.pixel_size) % self.pixel_size
+        pad_w = (self.pixel_size - W % self.pixel_size) % self.pixel_size
 
         # height direction
         h = cross_region_rearrange(x, 'h', self.s)
-        h = inner_region_rearrange(h, 'h', g_H)
+        h = inner_region_rearrange(h, 'h', self.pixel_size, pad_h)
         h = nn.Dense(C // 2,
                      use_bias=False
                      )(h)
@@ -69,12 +85,12 @@ class HireModule(nn.Module):
         else:
             raise NotImplementedError('Batchnorm or Layernorm')
         h = nn.relu(h)
-        h = nn.Dense(C * self.pixel_split_size)(h)
-        h = inner_region_restore(h, 'h', self.pixel_split_size)
+        h = nn.Dense(C * self.pixel_size)(h)
+        h = inner_region_restore(h, 'h', self.pixel_size, pad_h)
         h = cross_region_restore(h, 'h', self.s)
         # width direction
         w = cross_region_rearrange(x, 'w', self.s)
-        w = inner_region_rearrange(w, 'w', g_W)
+        w = inner_region_rearrange(w, 'w', self.pixel_size, pad_w)
         w = nn.Dense(C // 2,
                      use_bias=False
                      )(w)
@@ -85,12 +101,13 @@ class HireModule(nn.Module):
         else:
             raise NotImplementedError('Batchnorm or Layernorm')
         w = nn.relu(w)
-        w = nn.Dense(C * self.pixel_split_size)(w)
-        w = inner_region_restore(w, 'w', self.pixel_split_size)
+        w = nn.Dense(C * self.pixel_size)(w)
+        w = inner_region_restore(w, 'w', self.pixel_size, pad_w)
         w = cross_region_restore(w, 'w', self.s)
         # channel direction
         c = nn.Dense(C)(x)
 
+        # split attention
         a = jnp.mean(h + w + c, axis=[1, 2])
         a = nn.Dense(C // 4)(a)
         a = nn.gelu(a)
@@ -99,5 +116,22 @@ class HireModule(nn.Module):
 
         x = h * a[0] + w * a[1] + c * a[2]
         x = nn.Dense(C)(x)
+        return x
+
+
+class HireBlock(nn.Module):
+    deterministic: bool
+    pixel_size: int
+    s: int
+    survival_prob: float
+
+    @nn.compact
+    def __call__(self, x):
+        residual = nn.BatchNorm(self.deterministic)(x)
+        residual = HireModule(self.deterministic, self.pixel_size, self.s)(residual)
+        x = Droppath(self.survival_prob, self.deterministic)(residual) + x
+        residual = nn.BatchNorm(self.deterministic)(x)
+        residual = MLP()(residual)
+        x = Droppath(self.survival_prob, self.deterministic)(residual) + x
         return x
 
