@@ -7,12 +7,14 @@ from utils import Droppath
 
 def inner_region_rearrange(x, mode, pixel, n_pads):
     if mode == 'h':
-        x = jnp.concatenate([x[:, -n_pads:, :, :], x], axis=1)
+        if n_pads != 0:
+            x = jnp.concatenate([x[:, -n_pads:, :, :], x], axis=1)
         return rearrange(x, 'b (p h) w c -> b h w (p c)',
                          p=pixel
                          )
     else:
-        x = jnp.concatenate([x[:, :, -n_pads:, :], x], axis=2)
+        if n_pads != 0:
+            x = jnp.concatenate([x[:, :, -n_pads:, :], x], axis=2)
         return rearrange(x, 'b h (p w) c -> b h w (p c)',
                          p=pixel
                          )
@@ -135,3 +137,12 @@ class HireBlock(nn.Module):
         x = Droppath(self.survival_prob, self.deterministic)(residual) + x
         return x
 
+
+class HireMLP(nn.Module):
+    deterministic: bool
+    pixel_size: list[int]
+    s: list[int]
+    stochastic_depth: float = .1
+
+    @nn.compact
+    def __call__(self, x):
