@@ -3,6 +3,12 @@ import jax.numpy as jnp
 import flax.linen as nn
 from einops import rearrange
 from utils import Droppath
+from typing import List
+
+
+'''
+incomplete
+'''
 
 
 def inner_region_rearrange(x, mode, pixel, n_pads):
@@ -110,7 +116,7 @@ class HireModule(nn.Module):
         c = nn.Dense(C)(x)
 
         # split attention
-        a = jnp.mean(h + w + c, axis=[1, 2])
+        a = jnp.mean(h + w + c, axis=(1, 2))
         a = nn.Dense(C // 4)(a)
         a = nn.gelu(a)
         a = nn.Dense(C * 3)(a)
@@ -122,27 +128,27 @@ class HireModule(nn.Module):
 
 
 class HireBlock(nn.Module):
-    deterministic: bool
     pixel_size: int
     s: int
     survival_prob: float
 
     @nn.compact
-    def __call__(self, x):
+    def __call__(self, x, deterministic: bool):
         residual = nn.BatchNorm(self.deterministic)(x)
         residual = HireModule(self.deterministic, self.pixel_size, self.s)(residual)
-        x = Droppath(self.survival_prob, self.deterministic)(residual) + x
+        x = Droppath(self.survival_prob)(residual, deterministic) + x
         residual = nn.BatchNorm(self.deterministic)(x)
         residual = MLP()(residual)
-        x = Droppath(self.survival_prob, self.deterministic)(residual) + x
+        x = Droppath(self.survival_prob)(residual, deterministic) + x
         return x
 
 
 class HireMLP(nn.Module):
     deterministic: bool
-    pixel_size: list[int]
-    s: list[int]
+    pixel_size: List[int]
+    s: List[int]
     stochastic_depth: float = .1
 
     @nn.compact
     def __call__(self, x):
+

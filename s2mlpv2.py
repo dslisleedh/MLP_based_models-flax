@@ -35,7 +35,7 @@ class SpatialShiftAttention(nn.Module):
         x = rearrange(x, 'b h w (k c) -> b k (h w) c',
                       k=self.k
                       )
-        a = jnp.sum(x, [1, 2])
+        a = jnp.sum(x, (1, 2))
         a_hat = nn.Dense(c * self.k, use_bias=False)(nn.gelu(nn.Dense(c, use_bias=False)(a)))
         a_hat = jnp.reshape(a_hat, (b, self.k, c))
         a_bar = nn.softmax(a_hat, axis=1)
@@ -61,18 +61,17 @@ class CMMLP(nn.Module):
 class S2Blockv2(nn.Module):
     n_filters: int
     survival_prob: float
-    deterministic: bool
 
     @nn.compact
-    def __call__(self, x):
-        y = Droppath(self.survival_prob, self.deterministic)(SpatialShiftAttention()(nn.LayerNorm()(x))) + x
-        z = Droppath(self.survival_prob, self.deterministic)(CMMLP(self.n_filters)(nn.LayerNorm()(y))) + y
+    def __call__(self, x, deterministic: bool):
+        y = Droppath(self.survival_prob)(SpatialShiftAttention()(nn.LayerNorm()(x)), deterministic) + x
+        z = Droppath(self.survival_prob)(CMMLP(self.n_filters)(nn.LayerNorm()(y)), deterministic) + y
         return z
 
 
 class S2MLPv2(nn.Module):
     n_classes: int
-    training: bool
+    is_training: bool = False
     patch_size = [7, 2]
     n_filters = [256, 512]
     n_blocks = [7, 17]
@@ -91,9 +90,8 @@ class S2MLPv2(nn.Module):
             for k in range(self.n_blocks[i]):
                 x = S2Blockv2(self.n_filters[i],
                               survival_prob[sum(self.n_filters[:i]) + k],
-                              not self.training
-                              )(x)
-        x = jnp.mean(x, axis=[1, 2])
+                              )(x, deterministic=not self.is_training)
+        x = jnp.mean(x, axis=(1, 2))
         x = nn.Dense(self.n_classes)(x)
         x = nn.softmax(x)
         return x

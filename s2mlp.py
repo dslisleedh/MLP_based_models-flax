@@ -44,12 +44,11 @@ class S2Block(nn.Module):
     c: int
     r: int
     survival_prob: float
-    deterministic: bool
 
     @nn.compact
-    def __call__(self, x):
-        x = Droppath(self.survival_prob, self.deterministic)(MLP(self.c, self.r, True)(x)) + x
-        x = Droppath(self.survival_prob, self.deterministic)(MLP(self.c, self.r, False)(x)) + x
+    def __call__(self, x, deterministic: bool):
+        x = Droppath(self.survival_prob)(MLP(self.c, self.r, True)(x), deterministic) + x
+        x = Droppath(self.survival_prob)(MLP(self.c, self.r, False)(x), deterministic) + x
         return x
 
 
@@ -71,8 +70,8 @@ class S2MLP(nn.Module):
                     )(x)
         survival_prob = 1. - jnp.linspace(0., self.stochastic_depth, num=self.n)
         for prob in survival_prob:
-            x = S2Block(self.c, self.r, prob, not self.is_training)(x)
-        x = jnp.mean(x, [1, 2])
+            x = S2Block(self.c, self.r, prob)(x, deterministic=not self.is_training)
+        x = jnp.mean(x, (1, 2))
         x = nn.Dense(self.num_labels)(x)
         x = nn.softmax(x)
         return x

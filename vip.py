@@ -51,14 +51,13 @@ class WeightedPermutator(nn.Module):
 
 
 class PermutationBlock(nn.Module):
-    deterministic: bool
     n_filters: int
     survival_prob: float
 
     @nn.compact
-    def __call__(self, x):
-        x = Droppath(self.survival_prob, self.deterministic)(WeightedPermutator()(nn.LayerNorm()(x))) + x
-        x = Droppath(self.survival_prob, self.deterministic)(MLP(self.n_filters)(nn.LayerNorm()(x))) + x
+    def __call__(self, x, deterministic: bool):
+        x = Droppath(self.survival_prob, self.deterministic)(WeightedPermutator()(nn.LayerNorm()(x)), deterministic) + x
+        x = Droppath(self.survival_prob, self.deterministic)(MLP(self.n_filters)(nn.LayerNorm()(x)), deterministic) + x
         return x
 
 
@@ -80,11 +79,10 @@ class ViP(nn.Module):
                         use_bias=False
                         )(x)
             for n in range(self.n_layers[i]):
-                x = PermutationBlock(not self.is_training,
-                                     self.n_filters[i],
+                x = PermutationBlock(self.n_filters[i],
                                      survival_prob[sum(self.n_filters[:i]) + n]
-                                     )(x)
-        x = jnp.mean(x, [1, 2])
+                                     )(x, deterministic=not self.is_training)
+        x = jnp.mean(x, axis=(1, 2))
         x = nn.Dense(self.n_labels,
                      kernel_init=nn.initializers.zeros
                      )(x)

@@ -4,7 +4,6 @@ import flax.linen as nn
 from typing import Optional, Sequence
 
 
-
 class Droppath(nn.Module):
     survival_prob: float
     deterministic: Optional[bool] = None
