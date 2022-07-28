@@ -1,58 +1,57 @@
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
+import einops
 
 
 class MLP(nn.Module):
-    features: int
-    expansion_rate: int
+    expansion_rate: int = 4
+    act=nn.gelu
 
     @nn.compact
     def __call__(self, x):
-        x = nn.Dense(self.features * self.expansion_rate)(x)
-        x = nn.gelu(x)
-        x = nn.Dense(self.features)(x)
+        c = x.shape[-1]
+        x = nn.Dense(c * self.expansion_rate)(x)
+        x = self.act(x)
+        x = nn.Dense(c)(x)
         return x
 
 
 class MixerBlock(nn.Module):
-    n_patches: int
-    n_features: int
 
     @nn.compact
     def __call__(self, x):
-        y = nn.LayerNorm()(x)
-        y = jnp.swapaxes(y, 1, 2)
-        y = MLP(self.n_patches, 4)(y)
-        y = jnp.swapaxes(y, 1, 2)
-        x = x + y
-        y = nn.LayerNorm()(x)
-        return x + MLP(self.n_features, 4)(y)
+        x_res = nn.LayerNorm()(x)
+        x_res = jnp.swapaxes(x_res, 1, 2)
+        x_res = MLP()(x_res)
+        x_res = jnp.swapaxes(x_res, 1, 2)
+        x = x + x_res
+        x_res = nn.LayerNorm()(x)
+        return x + MLP()(x_res)
 
 
 class MlpMixer(nn.Module):
     num_classes: int
     num_blocks: int
     patch_size: int
-    num_patches: int
-    n_features: int
+    n_filters: int
 
     @nn.compact
     def __call__(self, x):
-        s = self.patch_size
         b, h, w, c = x.shape
-        featuremap = nn.Conv(self.n_features,
-                             (s, s),
-                             strides=(s, s)
-                             )(x)
-        featuremap = jnp.reshape(featuremap,
-                                 (b, -1, self.n_features)
-                                 )
+        s = self.patch_size
+        assert (h % s == 0) and (w % s == 0)
+        feature_map = nn.Conv(
+            self.n_filters, (s, s), strides=(s, s)
+        )(x)
+        feature_map = einops.rearrange(
+            feature_map, 'b h_s w_s c -> b (h_s w_s) c'
+        )
         for _ in range(self.num_blocks):
-            featuremap = MixerBlock(self.num_patches, self.n_features)(featuremap)
-        featuremap = nn.LayerNorm()(featuremap)
-        featuremap = jnp.mean(featuremap, axis=1)
-        y = nn.Dense(self.num_classes,
-                     kernel_init=nn.initializers.zeros
-                     )(featuremap)
-        return y
+            feature_map = MixerBlock()(feature_map)
+        feature_map = nn.LayerNorm()(feature_map)
+        feature_map = jnp.mean(feature_map, axis=1)
+        y = nn.Dense(
+            self.num_classes, kernel_init=nn.initializers.zeros
+        )(feature_map)
+        return nn.softmax(y)
